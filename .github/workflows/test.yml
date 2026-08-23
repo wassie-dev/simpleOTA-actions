@@ -1,0 +1,128 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Fast checks that need no SimpleOTA project: the shell logic, the manifest
+  # shape, and that the signature we produce actually verifies.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: for s in scripts/*.sh; do bash -n "$s"; done
+
+      - name: Every action.yml is a valid composite action
+        run: |
+          python3 - <<'PY'
+          import yaml, pathlib, sys
+          bad = 0
+          for f in sorted(pathlib.Path('.').rglob('action.yml')):
+              d = yaml.safe_load(f.read_text())
+              runs = d.get('runs', {})
+              if runs.get('using') != 'composite':
+                  print(f"{f}: not composite"); bad += 1
+              for s in runs.get('steps', []):
+                  if 'run' in s and s.get('shell') != 'bash':
+                      print(f"{f}: step '{s.get('name')}' missing shell: bash"); bad += 1
+              for name, spec in d.get('inputs', {}).items():
+                  if not spec.get('description'):
+                      print(f"{f}: input '{name}' has no description"); bad += 1
+          sys.exit(bad)
+          PY
+
+      - name: Manifest builder produces valid JSON and escapes correctly
+        run: |
+          set -euo pipefail
+          OUT=$(FRAMEWORK=arduino VERSION_LABEL=1.2.3 CHIP_FAMILY=esp32 SECURITY_MODE=basic \
+                ./scripts/manifest.sh)
+          jq -e '.framework=="arduino" and .security_mode=="basic" and (has("board_id")|not)' <<<"$OUT" >/dev/null
+
+          OUT=$(FRAMEWORK=arduino VERSION_LABEL=1.2.3 CHIP_FAMILY=esp32 BOARD_ID=devkit \
+                SECURITY_MODE=signed KEY_ID=k SIGNATURE_B64=QUJD \
+                RELEASE_NOTES='quote " newline
+                and \ backslash' ./scripts/manifest.sh)
+          jq -e '.signing_metadata.algorithm=="ed25519" and .board_id=="devkit"' <<<"$OUT" >/dev/null
+          echo "manifest ok"
+
+      - name: Security mode resolution
+        run: |
+          set -euo pipefail
+          [ "$(SECURITY_MODE=auto SIGNING_KEY=x KEY_ID=k ./scripts/resolve-security-mode.sh)" = signed ]
+          [ "$(SECURITY_MODE=auto ./scripts/resolve-security-mode.sh)" = basic ]
+          # signed without a key id must fail loudly rather than upload unsigned
+          if SECURITY_MODE=signed SIGNING_KEY=x ./scripts/resolve-security-mode.sh >/dev/null 2>&1; then
+            echo "expected failure when key-id is missing"; exit 1
+          fi
+          echo "security mode ok"
+
+      - name: Signature verifies against the public key, and tampering fails
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          openssl genpkey -algorithm ed25519 -out "$RUNNER_TEMP/k.pem"
+          openssl pkey -in "$RUNNER_TEMP/k.pem" -pubout -out "$RUNNER_TEMP/k.pub"
+          head -c 4096 /dev/urandom > "$RUNNER_TEMP/fw.bin"
+
+          SIG=$(SIGNING_KEY="$(cat "$RUNNER_TEMP/k.pem")" BINARY="$RUNNER_TEMP/fw.bin" ./scripts/sign.sh)
+          base64 -d <<<"$SIG" > "$RUNNER_TEMP/fw.sig"
+          openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/k.pub" -rawin \
+            -in "$RUNNER_TEMP/fw.bin" -sigfile "$RUNNER_TEMP/fw.sig"
+
+          printf 'x' >> "$RUNNER_TEMP/fw.bin"
+          if openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/k.pub" -rawin \
+               -in "$RUNNER_TEMP/fw.bin" -sigfile "$RUNNER_TEMP/fw.sig" 2>/dev/null; then
+            echo "tampered binary verified, which must never happen"; exit 1
+          fi
+
+          # the private key must not survive the step
+          ls "$RUNNER_TEMP"/simpleota-key.* 2>/dev/null && { echo "key left behind"; exit 1; } || true
+          echo "signing ok"
+
+  # Real upload against a live project. Only runs where the secrets exist, so
+  # forks and contributors are not blocked by it.
+  integration:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip without credentials
+        id: gate
+        env:
+          TOKEN: ${{ secrets.SIMPLEOTA_TEST_API_TOKEN }}
+        run: |
+          if [ -z "${TOKEN:-}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No SIMPLEOTA_TEST_API_TOKEN set; skipping the live upload." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build a throwaway binary
+        if: steps.gate.outputs.run == 'true'
+        run: head -c 65536 /dev/urandom > firmware.bin
+
+      - name: Upload it
+        if: steps.gate.outputs.run == 'true'
+        id: up
+        uses: ./upload
+        with:
+          api-token:     ${{ secrets.SIMPLEOTA_TEST_API_TOKEN }}
+          project-id:    ${{ vars.SIMPLEOTA_TEST_PROJECT_ID }}
+          binary:        firmware.bin
+          version-label: ci-${{ github.run_number }}
+          chip-family:   esp32
+          base-url:      ${{ vars.SIMPLEOTA_TEST_BASE_URL || 'https://simpleota.com' }}
+
+      - name: The upload returned a build number
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          test -n "${{ steps.up.outputs.build-number }}"
+          test -n "${{ steps.up.outputs.artifact-id }}"
+          echo "uploaded build ${{ steps.up.outputs.build-number }}"

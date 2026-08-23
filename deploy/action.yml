@@ -1,0 +1,109 @@
+name: 'SimpleOTA Deploy'
+description: 'Create and start a SimpleOTA deployment for an already-uploaded firmware build.'
+author: 'Alexander Wasserman'
+
+inputs:
+  api-token:   {description: 'API-scoped SimpleOTA project token. Pass from secrets.', required: true}
+  project-id:  {description: 'SimpleOTA project UUID.', required: true}
+  artifact-id: {description: 'Artifact UUID to deploy, from the upload action output.', required: true}
+  rollout-strategy:
+    description: 'immediate or canary.'
+    required: false
+    default: 'immediate'
+  rollout-percentage:
+    description: 'Percentage of the target audience to offer the build to.'
+    required: false
+    default: '100'
+  channel-ids:
+    description: 'Comma-separated release channel UUIDs to target.'
+    required: false
+    default: ''
+  group-ids:
+    description: 'Comma-separated device group UUIDs to target.'
+    required: false
+    default: ''
+  notes:
+    description: 'Notes stored with the deployment.'
+    required: false
+    default: ''
+  start:
+    description: 'Start the deployment immediately after creating it. Set false to stage it and start later.'
+    required: false
+    default: 'true'
+  base-url:    {description: 'SimpleOTA base URL.', required: false, default: 'https://simpleota.com'}
+
+outputs:
+  deployment-id:
+    description: 'UUID of the created deployment.'
+    value: ${{ steps.deploy.outputs.deployment-id }}
+  state:
+    description: 'Deployment state after this action ran.'
+    value: ${{ steps.deploy.outputs.state }}
+
+runs:
+  using: composite
+  steps:
+    - name: Create deployment
+      id: deploy
+      shell: bash
+      env:
+        API_TOKEN: ${{ inputs.api-token }}
+        PROJECT_ID: ${{ inputs.project-id }}
+        ARTIFACT_ID: ${{ inputs.artifact-id }}
+        STRATEGY: ${{ inputs.rollout-strategy }}
+        ROLLOUT: ${{ inputs.rollout-percentage }}
+        CHANNEL_IDS: ${{ inputs.channel-ids }}
+        GROUP_IDS: ${{ inputs.group-ids }}
+        NOTES: ${{ inputs.notes }}
+        START: ${{ inputs.start }}
+        BASE_URL: ${{ inputs.base-url }}
+      run: |
+        set -euo pipefail
+
+        case "${ROLLOUT:-}" in
+          ''|*[!0-9]*) echo "::error::rollout-percentage must be a whole number 0-100 (got '${ROLLOUT:-}')"; exit 1 ;;
+        esac
+        [ "$ROLLOUT" -le 100 ] || { echo "::error::rollout-percentage must be 0-100 (got '$ROLLOUT')"; exit 1; }
+
+        # A deployment with no audience matches no devices and can never ship,
+        # so fail here rather than creating something that silently does nothing.
+        if [ -z "$CHANNEL_IDS" ] && [ -z "$GROUP_IDS" ]; then
+          echo "::error::set channel-ids or group-ids; a deployment with no targets would match no devices"
+          exit 1
+        fi
+
+        to_array() { [ -z "$1" ] && echo '[]' || jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$";""))' <<<"$1"; }
+
+        BODY="$(jq -nc \
+          --arg artifact_id "$ARTIFACT_ID" \
+          --arg strategy "$STRATEGY" \
+          --argjson pct "$ROLLOUT" \
+          --argjson channels "$(to_array "$CHANNEL_IDS")" \
+          --argjson groups "$(to_array "$GROUP_IDS")" \
+          --arg notes "$NOTES" \
+          '{artifact_id: $artifact_id, rollout_strategy: $strategy, rollout_percentage: $pct,
+            target_channel_ids: $channels, target_group_ids: $groups, notes: $notes}')"
+
+        RESP="$(curl --fail-with-body -sS \
+          -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/" \
+          -H "Authorization: Bearer ${API_TOKEN}" \
+          -H 'Content-Type: application/json' \
+          -d "$BODY")"
+
+        DEP="$(jq -r '.id' <<<"$RESP")"
+        STATE="$(jq -r '.state' <<<"$RESP")"
+
+        # Creating a deployment does not start it; that is a separate
+        # transition, so devices are not offered the build until this runs.
+        if [ "$START" = "true" ]; then
+          RESP="$(curl --fail-with-body -sS \
+            -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEP}/actions/" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -d '{"action":"start"}')"
+          STATE="$(jq -r '.state' <<<"$RESP")"
+        fi
+
+        echo "deployment-id=$DEP" >> "$GITHUB_OUTPUT"
+        echo "state=$STATE"       >> "$GITHUB_OUTPUT"
+        echo "### SimpleOTA deployment \`$DEP\` is \`$STATE\` (${STRATEGY}, ${ROLLOUT}%)" >> "$GITHUB_STEP_SUMMARY"

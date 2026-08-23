@@ -1,0 +1,166 @@
+name: 'SimpleOTA Release'
+description: 'Sign an ESP32 firmware binary, upload it to SimpleOTA, and start a deployment in one step.'
+author: 'Alexander Wasserman'
+branding:
+  icon: 'upload-cloud'
+  color: 'purple'
+
+inputs:
+  api-token:
+    description: 'API-scoped SimpleOTA project token. Pass from secrets, never inline.'
+    required: true
+  project-id:
+    description: 'SimpleOTA project UUID.'
+    required: true
+  binary:
+    description: 'Path to the compiled application binary (Arduino: build/<sketch>.ino.bin, ESP-IDF: build/<project>.bin). Not a merged factory image.'
+    required: true
+  version-label:
+    description: 'Human-readable version for this build, e.g. 2026.35.61. Ordering comes from the server-allocated build number, not this label.'
+    required: true
+  chip-family:
+    description: 'Chip the build targets, e.g. esp32, esp32s3, esp32c3. Must match what the device reports.'
+    required: true
+  framework:
+    description: 'arduino or esp_idf.'
+    required: false
+    default: 'arduino'
+  board-id:
+    description: 'Board identifier. Must match what devices report, or they are not offered the build.'
+    required: false
+    default: ''
+  partition-profile:
+    description: 'Partition profile, e.g. min_spiffs. Matched exactly when set.'
+    required: false
+    default: ''
+  hardware-revision-min:
+    description: 'Lowest compatible hardware revision. Blank means any.'
+    required: false
+    default: ''
+  hardware-revision-max:
+    description: 'Highest compatible hardware revision. Blank means any.'
+    required: false
+    default: ''
+  release-notes:
+    description: 'Release notes stored with the artifact.'
+    required: false
+    default: ''
+  signing-key:
+    description: 'Ed25519 private key PEM. Pass from secrets. When set, the build is signed and uploaded as security_mode=signed.'
+    required: false
+    default: ''
+  key-id:
+    description: 'Signing key id as registered on the project, e.g. prod-2026. Required when signing.'
+    required: false
+    default: ''
+  security-mode:
+    description: 'auto (default), basic, token or signed. auto means signed when a signing-key is given, otherwise basic.'
+    required: false
+    default: 'auto'
+  rollout-percentage:
+    description: 'Percentage of the target audience to offer this build to.'
+    required: false
+    default: '100'
+  channel:
+    description: 'Release channel to deploy to. Must already exist on the project.'
+    required: false
+    default: 'stable'
+  base-url:
+    description: 'SimpleOTA base URL. Override for staging or self-hosted.'
+    required: false
+    default: 'https://simpleota.com'
+
+outputs:
+  build-number:
+    description: 'Server-allocated build number. Determines update ordering.'
+    value: ${{ steps.release.outputs.build-number }}
+  artifact-id:
+    description: 'UUID of the uploaded artifact.'
+    value: ${{ steps.release.outputs.artifact-id }}
+  deployment-id:
+    description: 'UUID of the deployment that was started.'
+    value: ${{ steps.release.outputs.deployment-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve security mode
+      id: mode
+      shell: bash
+      env:
+        SECURITY_MODE: ${{ inputs.security-mode }}
+        SIGNING_KEY: ${{ inputs.signing-key }}
+        KEY_ID: ${{ inputs.key-id }}
+      run: |
+        set -euo pipefail
+        MODE="$("${{ github.action_path }}/scripts/resolve-security-mode.sh")"
+        echo "value=$MODE" >> "$GITHUB_OUTPUT"
+
+    - name: Sign firmware
+      id: sign
+      if: steps.mode.outputs.value == 'signed'
+      shell: bash
+      env:
+        SIGNING_KEY: ${{ inputs.signing-key }}
+        BINARY: ${{ inputs.binary }}
+      run: |
+        set -euo pipefail
+        SIG="$("${{ github.action_path }}/scripts/sign.sh")"
+        echo "signature=$SIG" >> "$GITHUB_OUTPUT"
+
+    - name: Upload and deploy
+      id: release
+      shell: bash
+      env:
+        FRAMEWORK: ${{ inputs.framework }}
+        VERSION_LABEL: ${{ inputs.version-label }}
+        CHIP_FAMILY: ${{ inputs.chip-family }}
+        BOARD_ID: ${{ inputs.board-id }}
+        PARTITION_PROFILE: ${{ inputs.partition-profile }}
+        HARDWARE_REVISION_MIN: ${{ inputs.hardware-revision-min }}
+        HARDWARE_REVISION_MAX: ${{ inputs.hardware-revision-max }}
+        RELEASE_NOTES: ${{ inputs.release-notes }}
+        SECURITY_MODE: ${{ steps.mode.outputs.value }}
+        KEY_ID: ${{ inputs.key-id }}
+        SIGNATURE_B64: ${{ steps.sign.outputs.signature }}
+        API_TOKEN: ${{ inputs.api-token }}
+        PROJECT_ID: ${{ inputs.project-id }}
+        BINARY: ${{ inputs.binary }}
+        BASE_URL: ${{ inputs.base-url }}
+        ROLLOUT: ${{ inputs.rollout-percentage }}
+        CHANNEL: ${{ inputs.channel }}
+      run: |
+        set -euo pipefail
+
+        case "${ROLLOUT:-}" in
+          ''|*[!0-9]*) echo "::error::rollout-percentage must be a whole number 0-100 (got '${ROLLOUT:-}')"; exit 1 ;;
+        esac
+        [ "$ROLLOUT" -le 100 ] || { echo "::error::rollout-percentage must be 0-100 (got '$ROLLOUT')"; exit 1; }
+        [ -f "$BINARY" ] || { echo "::error::binary not found: $BINARY"; exit 1; }
+        MANIFEST="$("${{ github.action_path }}/scripts/manifest.sh")"
+
+        # --fail-with-body: plain curl exits 0 on an HTTP error, which would
+        # turn a rejected upload into a green build.
+        RESP="$(curl --fail-with-body -sS \
+          -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/release/" \
+          -H "Authorization: Bearer ${API_TOKEN}" \
+          -F "manifest=${MANIFEST}" \
+          -F "binary=@${BINARY}" \
+          -F "rollout_percentage=${ROLLOUT}" \
+          -F "channel_name=${CHANNEL}")"
+
+        BUILD="$(jq -r '.build_number' <<<"$RESP")"
+        echo "build-number=$BUILD"                              >> "$GITHUB_OUTPUT"
+        echo "artifact-id=$(jq -r '.artifact_id' <<<"$RESP")"   >> "$GITHUB_OUTPUT"
+        echo "deployment-id=$(jq -r '.deployment_id' <<<"$RESP")" >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### SimpleOTA release"
+          echo ""
+          echo "| | |"
+          echo "|---|---|"
+          echo "| Build | \`$BUILD\` |"
+          echo "| Version | \`${VERSION_LABEL}\` |"
+          echo "| Security | \`${SECURITY_MODE}\` |"
+          echo "| Channel | \`${CHANNEL}\` at ${ROLLOUT}% |"
+        } >> "$GITHUB_STEP_SUMMARY"

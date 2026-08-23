@@ -1,0 +1,64 @@
+name: 'SimpleOTA Promote'
+description: 'Ramp, pause, resume, cancel or complete an existing SimpleOTA deployment.'
+author: 'Alexander Wasserman'
+
+inputs:
+  api-token:     {description: 'API-scoped SimpleOTA project token. Pass from secrets.', required: true}
+  project-id:    {description: 'SimpleOTA project UUID.', required: true}
+  deployment-id: {description: 'Deployment UUID to act on.', required: true}
+  action:
+    description: 'ramp, start, pause, resume, cancel or complete.'
+    required: false
+    default: 'ramp'
+  rollout-percentage:
+    description: 'New percentage. Required when action is ramp.'
+    required: false
+    default: ''
+  base-url:      {description: 'SimpleOTA base URL.', required: false, default: 'https://simpleota.com'}
+
+outputs:
+  state:
+    description: 'Deployment state after the transition.'
+    value: ${{ steps.promote.outputs.state }}
+
+runs:
+  using: composite
+  steps:
+    - name: Transition deployment
+      id: promote
+      shell: bash
+      env:
+        API_TOKEN: ${{ inputs.api-token }}
+        PROJECT_ID: ${{ inputs.project-id }}
+        DEPLOYMENT_ID: ${{ inputs.deployment-id }}
+        ACTION: ${{ inputs.action }}
+        ROLLOUT: ${{ inputs.rollout-percentage }}
+        BASE_URL: ${{ inputs.base-url }}
+      run: |
+        set -euo pipefail
+
+        case "$ACTION" in
+          ramp|start|pause|resume|cancel|complete) ;;
+          *) echo "::error::action must be one of ramp, start, pause, resume, cancel, complete (got '$ACTION')"; exit 1 ;;
+        esac
+
+        if [ "$ACTION" = "ramp" ]; then
+          [ -n "$ROLLOUT" ] || { echo "::error::action 'ramp' requires rollout-percentage"; exit 1; }
+          case "$ROLLOUT" in
+            ''|*[!0-9]*) echo "::error::rollout-percentage must be a whole number 0-100 (got '$ROLLOUT')"; exit 1 ;;
+          esac
+          [ "$ROLLOUT" -le 100 ] || { echo "::error::rollout-percentage must be 0-100"; exit 1; }
+          BODY="$(jq -nc --arg a "$ACTION" --argjson p "$ROLLOUT" '{action:$a, rollout_percentage:$p}')"
+        else
+          BODY="$(jq -nc --arg a "$ACTION" '{action:$a}')"
+        fi
+
+        RESP="$(curl --fail-with-body -sS \
+          -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEPLOYMENT_ID}/actions/" \
+          -H "Authorization: Bearer ${API_TOKEN}" \
+          -H 'Content-Type: application/json' \
+          -d "$BODY")"
+
+        STATE="$(jq -r '.state' <<<"$RESP")"
+        echo "state=$STATE" >> "$GITHUB_OUTPUT"
+        echo "### SimpleOTA deployment \`$ACTION\` -> \`$STATE\`" >> "$GITHUB_STEP_SUMMARY"
