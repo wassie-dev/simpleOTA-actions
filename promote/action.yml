@@ -65,7 +65,7 @@ runs:
         fi
 
         RESP="$(curl --fail-with-body -sS \
-          -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEPLOYMENT_ID}/actions/" \
+          -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEPLOYMENT_ID}/transition/" \
           -H "Authorization: Bearer ${API_TOKEN}" \
           -H 'Content-Type: application/json' \
           -d "$BODY")"

@@ -108,7 +108,7 @@ runs:
         # transition, so devices are not offered the build until this runs.
         if [ "$START" = "true" ]; then
           RESP="$(curl --fail-with-body -sS \
-            -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEP}/actions/" \
+            -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEP}/transition/" \
             -H "Authorization: Bearer ${API_TOKEN}" \
             -H 'Content-Type: application/json' \
             -d '{"action":"start"}')"

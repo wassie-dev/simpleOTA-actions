@@ -9,6 +9,20 @@ for a fixed version.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-08-24
+
+### Fixed
+
+- `deploy` and `promote` posted deployment transitions to
+  `/deployments/{id}/actions/`, which is no longer a route. The endpoint is
+  `/deployments/{id}/transition/`. Both actions returned a `404` from every
+  call: `promote` in full, and `deploy` whenever `start` was left at its
+  default of `true`, so a deployment was created but never started and no
+  device was offered the build. The request bodies were already correct, so
+  this is a path fix only, with no change to inputs or outputs. The root
+  action was unaffected: it uses `/release/`, which uploads, deploys and
+  starts in one call.
+
 ## [1.0.1] - 2026-08-23
 
 ### Fixed
@@ -44,6 +58,7 @@ for a fixed version.
 - `simpleOTA-actions/promote`: ramp, start, pause, resume, cancel or complete a
   deployment.
 
-[Unreleased]: https://github.com/xanderwasserman/simpleOTA-actions/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/xanderwasserman/simpleOTA-actions/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/xanderwasserman/simpleOTA-actions/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/xanderwasserman/simpleOTA-actions/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/xanderwasserman/simpleOTA-actions/releases/tag/v1.0.0
