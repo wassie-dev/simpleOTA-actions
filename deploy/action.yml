@@ -43,6 +43,17 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        API_TOKEN: ${{ inputs.api-token }}
+        PROJECT_ID: ${{ inputs.project-id }}
+        ARTIFACT_ID: ${{ inputs.artifact-id }}
+      run: |
+        "${{ github.action_path }}/../scripts/require-inputs.sh" \
+          API_TOKEN:api-token PROJECT_ID:project-id \
+          ARTIFACT_ID:artifact-id
+
     - name: Create deployment
       id: deploy
       shell: bash

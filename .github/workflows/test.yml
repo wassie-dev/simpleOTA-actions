@@ -60,6 +60,23 @@ jobs:
           fi
           echo "security mode ok"
 
+      - name: Required inputs are enforced
+        run: |
+          set -euo pipefail
+          # GitHub does not enforce `required: true` for composite actions, so
+          # the action has to. An empty project-id must fail here rather than
+          # becoming a malformed URL and a confusing HTTP error.
+          if API_TOKEN=t PROJECT_ID= BINARY=x VERSION_LABEL=v CHIP_FAMILY=esp32 \
+             ./scripts/require-inputs.sh API_TOKEN:api-token PROJECT_ID:project-id \
+             BINARY:binary VERSION_LABEL:version-label CHIP_FAMILY:chip-family 2>/dev/null; then
+            echo "empty project-id was accepted"; exit 1
+          fi
+          # and the happy path stays silent
+          API_TOKEN=t PROJECT_ID=p BINARY=x VERSION_LABEL=v CHIP_FAMILY=esp32 \
+            ./scripts/require-inputs.sh API_TOKEN:api-token PROJECT_ID:project-id \
+            BINARY:binary VERSION_LABEL:version-label CHIP_FAMILY:chip-family
+          echo "required inputs ok"
+
       - name: Signature verifies against the public key, and tampering fails
         env:
           RUNNER_TEMP: ${{ runner.temp }}

@@ -84,6 +84,20 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        API_TOKEN: ${{ inputs.api-token }}
+        PROJECT_ID: ${{ inputs.project-id }}
+        BINARY: ${{ inputs.binary }}
+        VERSION_LABEL: ${{ inputs.version-label }}
+        CHIP_FAMILY: ${{ inputs.chip-family }}
+      run: |
+        "${{ github.action_path }}/scripts/require-inputs.sh" \
+          API_TOKEN:api-token PROJECT_ID:project-id \
+          BINARY:binary VERSION_LABEL:version-label \
+          CHIP_FAMILY:chip-family
+
     - name: Resolve security mode
       id: mode
       shell: bash

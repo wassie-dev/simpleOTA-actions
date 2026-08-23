@@ -24,6 +24,17 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        API_TOKEN: ${{ inputs.api-token }}
+        PROJECT_ID: ${{ inputs.project-id }}
+        DEPLOYMENT_ID: ${{ inputs.deployment-id }}
+      run: |
+        "${{ github.action_path }}/../scripts/require-inputs.sh" \
+          API_TOKEN:api-token PROJECT_ID:project-id \
+          DEPLOYMENT_ID:deployment-id
+
     - name: Transition deployment
       id: promote
       shell: bash
