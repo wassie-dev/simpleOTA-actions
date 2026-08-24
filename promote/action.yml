@@ -64,8 +64,9 @@ runs:
           BODY="$(jq -nc --arg a "$ACTION" '{action:$a}')"
         fi
 
-        RESP="$(curl --fail-with-body -sS \
-          -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEPLOYMENT_ID}/transition/" \
+        RESP="$("${{ github.action_path }}/../scripts/api.sh" \
+          "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEPLOYMENT_ID}/transition/" \
+          -X POST \
           -H "Authorization: Bearer ${API_TOKEN}" \
           -H 'Content-Type: application/json' \
           -d "$BODY")"

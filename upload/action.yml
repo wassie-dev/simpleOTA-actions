@@ -92,8 +92,9 @@ runs:
         [ -f "$BINARY" ] || { echo "::error::binary not found: $BINARY"; exit 1; }
         MANIFEST="$("${{ github.action_path }}/../scripts/manifest.sh")"
 
-        RESP="$(curl --fail-with-body -sS \
-          -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/artifacts/" \
+        RESP="$("${{ github.action_path }}/../scripts/api.sh" \
+          "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/artifacts/" \
+          -X POST \
           -H "Authorization: Bearer ${API_TOKEN}" \
           -F "manifest=${MANIFEST}" \
           -F "binary=@${BINARY}")"

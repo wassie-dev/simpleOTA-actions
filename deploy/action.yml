@@ -95,8 +95,9 @@ runs:
           '{artifact_id: $artifact_id, rollout_strategy: $strategy, rollout_percentage: $pct,
             target_channel_ids: $channels, target_group_ids: $groups, notes: $notes}')"
 
-        RESP="$(curl --fail-with-body -sS \
-          -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/" \
+        RESP="$("${{ github.action_path }}/../scripts/api.sh" \
+          "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/" \
+          -X POST \
           -H "Authorization: Bearer ${API_TOKEN}" \
           -H 'Content-Type: application/json' \
           -d "$BODY")"
@@ -107,8 +108,9 @@ runs:
         # Creating a deployment does not start it; that is a separate
         # transition, so devices are not offered the build until this runs.
         if [ "$START" = "true" ]; then
-          RESP="$(curl --fail-with-body -sS \
-            -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEP}/transition/" \
+          RESP="$("${{ github.action_path }}/../scripts/api.sh" \
+            "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${DEP}/transition/" \
+            -X POST \
             -H "Authorization: Bearer ${API_TOKEN}" \
             -H 'Content-Type: application/json' \
             -d '{"action":"start"}')"

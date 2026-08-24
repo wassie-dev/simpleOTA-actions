@@ -153,10 +153,11 @@ runs:
         [ -f "$BINARY" ] || { echo "::error::binary not found: $BINARY"; exit 1; }
         MANIFEST="$("${{ github.action_path }}/scripts/manifest.sh")"
 
-        # --fail-with-body: plain curl exits 0 on an HTTP error, which would
-        # turn a rejected upload into a green build.
-        RESP="$(curl --fail-with-body -sS \
-          -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/release/" \
+        # api.sh fails the step on any HTTP error and reports the server's
+        # `detail` message, which plain curl would discard.
+        RESP="$("${{ github.action_path }}/scripts/api.sh" \
+          "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/release/" \
+          -X POST \
           -H "Authorization: Bearer ${API_TOKEN}" \
           -F "manifest=${MANIFEST}" \
           -F "binary=@${BINARY}" \

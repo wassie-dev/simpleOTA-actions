@@ -103,29 +103,68 @@ jobs:
 
   # Real upload against a live project. Only runs where the secrets exist, so
   # forks and contributors are not blocked by it.
+  # Exercises every action against a real SimpleOTA project.
+  #
+  # The unit job proves the YAML parses and the shell runs. It cannot prove a
+  # URL exists: v1.0.1 shipped `deploy` and `promote` posting transitions to
+  # /deployments/{id}/actions/, which was never a route, and it passed CI
+  # because `upload` was the only action ever run live. So this walks the whole
+  # chain, both transition call sites included.
+  #
+  # Each run consumes two of the test project's monthly artifact uploads, so it
+  # is limited to main and manual runs rather than every branch push.
   integration:
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    env:
+      API_TOKEN:  ${{ secrets.SIMPLEOTA_TEST_API_TOKEN }}
+      PROJECT_ID: ${{ vars.SIMPLEOTA_TEST_PROJECT_ID }}
+      BASE_URL:   ${{ vars.SIMPLEOTA_TEST_BASE_URL || 'https://simpleota.com' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Skip without credentials
         id: gate
-        env:
-          TOKEN: ${{ secrets.SIMPLEOTA_TEST_API_TOKEN }}
         run: |
-          if [ -z "${TOKEN:-}" ]; then
+          set -euo pipefail
+          missing=""
+          [ -n "${API_TOKEN:-}" ]  || missing="$missing SIMPLEOTA_TEST_API_TOKEN(secret)"
+          [ -n "${PROJECT_ID:-}" ] || missing="$missing SIMPLEOTA_TEST_PROJECT_ID(variable)"
+          if [ -n "$missing" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "No SIMPLEOTA_TEST_API_TOKEN set; skipping the live upload." >> "$GITHUB_STEP_SUMMARY"
+            echo "Live tests skipped. Missing:$missing" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build a throwaway binary
+      # deploy targets channels by UUID, not by name, so look it up rather
+      # than carry another repository variable that could drift.
+      - name: Resolve the stable channel id
         if: steps.gate.outputs.run == 'true'
-        run: head -c 65536 /dev/urandom > firmware.bin
+        id: chan
+        run: |
+          set -euo pipefail
+          resp="$(./scripts/api.sh \
+            "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/channels/" \
+            -H "Authorization: Bearer ${API_TOKEN}")"
+          id="$(jq -r '.[] | select(.name == "stable") | .id' <<<"$resp")"
+          if [ -z "$id" ]; then
+            echo "::error::the test project has no release channel named 'stable'"
+            exit 1
+          fi
+          echo "channel-id=$id" >> "$GITHUB_OUTPUT"
 
-      - name: Upload it
+      - name: Build throwaway binaries
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          head -c 65536 /dev/urandom > firmware.bin
+          head -c 65536 /dev/urandom > firmware-release.bin
+
+      # --- upload -> deploy -> promote, the three-step flow -----------------
+
+      - name: upload
         if: steps.gate.outputs.run == 'true'
         id: up
         uses: ./upload
@@ -137,9 +176,104 @@ jobs:
           chip-family:   esp32
           base-url:      ${{ vars.SIMPLEOTA_TEST_BASE_URL || 'https://simpleota.com' }}
 
-      - name: The upload returned a build number
+      - name: deploy the artifact as a 10% canary, started
+        if: steps.gate.outputs.run == 'true'
+        id: dep
+        uses: ./deploy
+        with:
+          api-token:          ${{ secrets.SIMPLEOTA_TEST_API_TOKEN }}
+          project-id:         ${{ vars.SIMPLEOTA_TEST_PROJECT_ID }}
+          artifact-id:        ${{ steps.up.outputs.artifact-id }}
+          channel-ids:        ${{ steps.chan.outputs.channel-id }}
+          rollout-strategy:   canary
+          rollout-percentage: '10'
+          notes:              "CI run ${{ github.run_number }}"
+          base-url:           ${{ vars.SIMPLEOTA_TEST_BASE_URL || 'https://simpleota.com' }}
+
+      - name: promote ramps the canary to 50%
+        if: steps.gate.outputs.run == 'true'
+        id: ramp
+        uses: ./promote
+        with:
+          api-token:          ${{ secrets.SIMPLEOTA_TEST_API_TOKEN }}
+          project-id:         ${{ vars.SIMPLEOTA_TEST_PROJECT_ID }}
+          deployment-id:      ${{ steps.dep.outputs.deployment-id }}
+          action:             ramp
+          rollout-percentage: '50'
+          base-url:           ${{ vars.SIMPLEOTA_TEST_BASE_URL || 'https://simpleota.com' }}
+
+      - name: promote pauses it
+        if: steps.gate.outputs.run == 'true'
+        id: pause
+        uses: ./promote
+        with:
+          api-token:     ${{ secrets.SIMPLEOTA_TEST_API_TOKEN }}
+          project-id:    ${{ vars.SIMPLEOTA_TEST_PROJECT_ID }}
+          deployment-id: ${{ steps.dep.outputs.deployment-id }}
+          action:        pause
+          base-url:      ${{ vars.SIMPLEOTA_TEST_BASE_URL || 'https://simpleota.com' }}
+
+      - name: promote resumes it
+        if: steps.gate.outputs.run == 'true'
+        id: resume
+        uses: ./promote
+        with:
+          api-token:     ${{ secrets.SIMPLEOTA_TEST_API_TOKEN }}
+          project-id:    ${{ vars.SIMPLEOTA_TEST_PROJECT_ID }}
+          deployment-id: ${{ steps.dep.outputs.deployment-id }}
+          action:        resume
+          base-url:      ${{ vars.SIMPLEOTA_TEST_BASE_URL || 'https://simpleota.com' }}
+
+      - name: the three-step flow reported the states we expect
         if: steps.gate.outputs.run == 'true'
         run: |
+          set -euo pipefail
           test -n "${{ steps.up.outputs.build-number }}"
           test -n "${{ steps.up.outputs.artifact-id }}"
-          echo "uploaded build ${{ steps.up.outputs.build-number }}"
+          test -n "${{ steps.dep.outputs.deployment-id }}"
+          # deploy defaults start:true, so the deployment must already be live.
+          test "${{ steps.dep.outputs.state }}"    = "active"
+          test "${{ steps.ramp.outputs.state }}"   = "active"
+          test "${{ steps.pause.outputs.state }}"  = "paused"
+          test "${{ steps.resume.outputs.state }}" = "active"
+          echo "upload -> deploy -> ramp -> pause -> resume all behaved" >> "$GITHUB_STEP_SUMMARY"
+
+      # --- the root action, which uses /release/ and is a separate path -----
+
+      - name: the root action releases in one step
+        if: steps.gate.outputs.run == 'true'
+        id: rel
+        uses: ./
+        with:
+          api-token:     ${{ secrets.SIMPLEOTA_TEST_API_TOKEN }}
+          project-id:    ${{ vars.SIMPLEOTA_TEST_PROJECT_ID }}
+          binary:        firmware-release.bin
+          version-label: ci-release-${{ github.run_number }}
+          chip-family:   esp32
+          channel:       stable
+          base-url:      ${{ vars.SIMPLEOTA_TEST_BASE_URL || 'https://simpleota.com' }}
+
+      - name: the root action returned a started deployment
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          test -n "${{ steps.rel.outputs.build-number }}"
+          test -n "${{ steps.rel.outputs.artifact-id }}"
+          test -n "${{ steps.rel.outputs.deployment-id }}"
+          echo "root action released build ${{ steps.rel.outputs.build-number }}" >> "$GITHUB_STEP_SUMMARY"
+
+      # --- always clean up, so a failed run does not leave a live rollout ---
+
+      - name: Cancel the deployments this run created
+        if: always() && steps.gate.outputs.run == 'true'
+        run: |
+          set -uo pipefail
+          for dep in "${{ steps.dep.outputs.deployment-id }}" "${{ steps.rel.outputs.deployment-id }}"; do
+            [ -n "$dep" ] || continue
+            code="$(curl -sS -o /tmp/cancel.json -w '%{http_code}' \
+              -X POST "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/${dep}/transition/" \
+              -H "Authorization: Bearer ${API_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              -d '{"action":"cancel"}' || echo 000)"
+            echo "cancel $dep -> HTTP $code"
+          done
