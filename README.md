@@ -8,15 +8,15 @@ Four actions live here. Most pipelines only need the first.
 
 | Action | Use it when |
 |---|---|
-| `xanderwasserman/simpleOTA-actions@v1` | Every merge should ship. Signs, uploads and deploys in one step. |
-| `xanderwasserman/simpleOTA-actions/upload@v1` | CI builds and uploads, but a human decides when it ships. |
-| `xanderwasserman/simpleOTA-actions/deploy@v1` | Deploy a build that was uploaded earlier. |
-| `xanderwasserman/simpleOTA-actions/promote@v1` | Ramp a canary, or pause and cancel a rollout. |
+| `wassie-dev/simpleOTA-actions@v1` | Every merge should ship. Signs, uploads and deploys in one step. |
+| `wassie-dev/simpleOTA-actions/upload@v1` | CI builds and uploads, but a human decides when it ships. |
+| `wassie-dev/simpleOTA-actions/deploy@v1` | Deploy a build that was uploaded earlier. |
+| `wassie-dev/simpleOTA-actions/promote@v1` | Ramp a canary, or pause and cancel a rollout. |
 
 ## Ship on every merge
 
 ```yaml
-- uses: xanderwasserman/simpleOTA-actions@v1
+- uses: wassie-dev/simpleOTA-actions@v1
   with:
     api-token:    ${{ secrets.SIMPLEOTA_API_TOKEN }}
     project-id:   ${{ vars.SIMPLEOTA_PROJECT_ID }}
@@ -49,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # ... compile ...
-      - uses: xanderwasserman/simpleOTA-actions/upload@v1
+      - uses: wassie-dev/simpleOTA-actions/upload@v1
         id: up
         with:
           api-token:     ${{ secrets.SIMPLEOTA_API_TOKEN }}
@@ -65,7 +65,7 @@ jobs:
     environment: production      # required reviewers gate this
     runs-on: ubuntu-latest
     steps:
-      - uses: xanderwasserman/simpleOTA-actions/deploy@v1
+      - uses: wassie-dev/simpleOTA-actions/deploy@v1
         with:
           api-token:   ${{ secrets.SIMPLEOTA_API_TOKEN }}
           project-id:  ${{ vars.SIMPLEOTA_PROJECT_ID }}
@@ -76,7 +76,7 @@ jobs:
 ## Canary, then ramp
 
 ```yaml
-      - uses: xanderwasserman/simpleOTA-actions/deploy@v1
+      - uses: wassie-dev/simpleOTA-actions/deploy@v1
         id: canary
         with:
           api-token:          ${{ secrets.SIMPLEOTA_API_TOKEN }}
@@ -88,7 +88,7 @@ jobs:
 
       # ... watch the rollout, then in a gated job ...
 
-      - uses: xanderwasserman/simpleOTA-actions/promote@v1
+      - uses: wassie-dev/simpleOTA-actions/promote@v1
         with:
           api-token:          ${{ secrets.SIMPLEOTA_API_TOKEN }}
           project-id:         ${{ vars.SIMPLEOTA_PROJECT_ID }}
@@ -137,8 +137,8 @@ runners. Nothing is installed at runtime.
 
 ## Related
 
-- [SimpleOTAClient for Arduino](https://github.com/xanderwasserman/SimpleOTAClient-Arduino)
-- [SimpleOTA component for ESP-IDF](https://github.com/xanderwasserman/SimpleOTAClient-ESP-IDF)
+- [SimpleOTAClient for Arduino](https://github.com/wassie-dev/simpleOTAClient-Arduino)
+- [SimpleOTA component for ESP-IDF](https://github.com/wassie-dev/simpleOTAClient-ESP-IDF)
 - [Developer API reference](https://wiki.simpleota.com/api/developer-api/)
 
 ## License
