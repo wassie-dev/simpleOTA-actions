@@ -101,6 +101,35 @@ jobs:
           ls "$RUNNER_TEMP"/simpleota-key.* 2>/dev/null && { echo "key left behind"; exit 1; } || true
           echo "signing ok"
 
+      - name: Strict signing hands the CLI what it needs and leaves nothing behind
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          # A stand-in for the CLI that records how it was called.
+          mkdir -p "$RUNNER_TEMP/stub"
+          cat > "$RUNNER_TEMP/stub/simpleota" <<'STUB'
+          #!/usr/bin/env bash
+          if [ "$1 $2" = "build --help" ]; then echo "make-strict"; exit 0; fi
+          [ "${FAIL:-}" = 1 ] && exit 1
+          printf '%s|%s|%s|%s|%s\n' "$*" "$SIMPLEOTA_TOKEN" "$SIMPLEOTA_PROJECT" "$SIMPLEOTA_API_URL" "$SIMPLEOTA_SIGNING_KEY" > "$CALL_LOG"
+          STUB
+          chmod +x "$RUNNER_TEMP/stub/simpleota"
+          export PATH="$RUNNER_TEMP/stub:$PATH" CALL_LOG="$RUNNER_TEMP/call.log"
+          export API_TOKEN=tok PROJECT_ID=proj BASE_URL=https://example.test/ SIGNING_KEY=pem BUILD=42 BINARY=fw.bin
+
+          ./scripts/make-strict.sh
+          [ "$(cat "$CALL_LOG")" = "build make-strict 42 fw.bin|tok|proj|https://example.test|pem" ]
+
+          # a failure names the build and the command that finishes the job
+          if OUT="$(FAIL=1 ./scripts/make-strict.sh 2>&1)"; then
+            echo "a failed strict signature was reported as success"; exit 1
+          fi
+          grep -q "simpleota build make-strict 42" <<<"$OUT"
+
+          ls -d "$RUNNER_TEMP"/simpleota-cli.* 2>/dev/null && { echo "work directory left behind"; exit 1; } || true
+          echo "strict signing ok"
+
   # Real upload against a live project. Only runs where the secrets exist, so
   # forks and contributors are not blocked by it.
   # Exercises every action against a real SimpleOTA project.

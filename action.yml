@@ -46,7 +46,7 @@ inputs:
     required: false
     default: ''
   signing-key:
-    description: 'Ed25519 private key PEM. Pass from secrets. When set, the build is signed and uploaded as security_mode=signed.'
+    description: 'Ed25519 private key PEM. Pass from secrets. When set, the build is signed, uploaded as security_mode=signed and made strict-ready, so devices in strict mode take it too.'
     required: false
     default: ''
   key-id:
@@ -69,6 +69,10 @@ inputs:
     description: 'SimpleOTA base URL. Override for staging or self-hosted.'
     required: false
     default: 'https://simpleota.com'
+  cli-version:
+    description: 'SimpleOTA CLI release that makes a signed build strict-ready, e.g. 0.2.0. Empty means the latest. Ignored when simpleota is already on PATH.'
+    required: false
+    default: ''
 
 outputs:
   build-number:
@@ -143,31 +147,52 @@ runs:
         BASE_URL: ${{ inputs.base-url }}
         ROLLOUT: ${{ inputs.rollout-percentage }}
         CHANNEL: ${{ inputs.channel }}
+        SIGNING_KEY: ${{ inputs.signing-key }}
+        CLI_VERSION: ${{ inputs.cli-version }}
       run: |
         set -euo pipefail
+        SCRIPTS="${{ github.action_path }}/scripts"
 
         case "${ROLLOUT:-}" in
           ''|*[!0-9]*) echo "::error::rollout-percentage must be a whole number 0-100 (got '${ROLLOUT:-}')"; exit 1 ;;
         esac
         [ "$ROLLOUT" -le 100 ] || { echo "::error::rollout-percentage must be 0-100 (got '$ROLLOUT')"; exit 1; }
         [ -f "$BINARY" ] || { echo "::error::binary not found: $BINARY"; exit 1; }
-        MANIFEST="$("${{ github.action_path }}/scripts/manifest.sh")"
 
-        # api.sh fails the step on any HTTP error and reports the server's
-        # `detail` message, which plain curl would discard.
-        RESP="$("${{ github.action_path }}/scripts/api.sh" \
-          "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/release/" \
-          -X POST \
-          -H "Authorization: Bearer ${API_TOKEN}" \
-          -F "manifest=${MANIFEST}" \
-          -F "binary=@${BINARY}" \
-          -F "rollout_percentage=${ROLLOUT}" \
-          -F "channel_name=${CHANNEL}")"
+        if [ "$SECURITY_MODE" = "signed" ]; then
+          # A signed build is made strict-ready before it is deployed, so a
+          # deployment never offers it without its strict signature. The
+          # one-call release below deploys at once, so it cannot do that.
+          export CHANNEL_ID
+          CHANNEL_ID="$("$SCRIPTS/channel-id.sh")"
+          RESP="$("$SCRIPTS/upload.sh")"
+          export BUILD ARTIFACT_ID
+          BUILD="$(jq -r '.build_number' <<<"$RESP")"
+          ARTIFACT_ID="$(jq -r '.id' <<<"$RESP")"
+          "$SCRIPTS/make-strict.sh"
+          DEPLOYMENT_ID="$("$SCRIPTS/start-deployment.sh" | jq -r '.id')"
+          SECURITY_TEXT="signed, strict-ready"
+        else
+          MANIFEST="$("$SCRIPTS/manifest.sh")"
+          # api.sh fails the step on any HTTP error and reports the server's
+          # `detail` message, which plain curl would discard.
+          RESP="$("$SCRIPTS/api.sh" \
+            "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/release/" \
+            -X POST \
+            -H "Authorization: Bearer ${API_TOKEN}" \
+            -F "manifest=${MANIFEST}" \
+            -F "binary=@${BINARY}" \
+            -F "rollout_percentage=${ROLLOUT}" \
+            -F "channel_name=${CHANNEL}")"
+          BUILD="$(jq -r '.build_number' <<<"$RESP")"
+          ARTIFACT_ID="$(jq -r '.artifact_id' <<<"$RESP")"
+          DEPLOYMENT_ID="$(jq -r '.deployment_id' <<<"$RESP")"
+          SECURITY_TEXT="$SECURITY_MODE"
+        fi
 
-        BUILD="$(jq -r '.build_number' <<<"$RESP")"
-        echo "build-number=$BUILD"                              >> "$GITHUB_OUTPUT"
-        echo "artifact-id=$(jq -r '.artifact_id' <<<"$RESP")"   >> "$GITHUB_OUTPUT"
-        echo "deployment-id=$(jq -r '.deployment_id' <<<"$RESP")" >> "$GITHUB_OUTPUT"
+        echo "build-number=$BUILD"          >> "$GITHUB_OUTPUT"
+        echo "artifact-id=$ARTIFACT_ID"     >> "$GITHUB_OUTPUT"
+        echo "deployment-id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
 
         {
           echo "### SimpleOTA release"
@@ -176,6 +201,6 @@ runs:
           echo "|---|---|"
           echo "| Build | \`$BUILD\` |"
           echo "| Version | \`${VERSION_LABEL}\` |"
-          echo "| Security | \`${SECURITY_MODE}\` |"
+          echo "| Security | ${SECURITY_TEXT} |"
           echo "| Channel | \`${CHANNEL}\` at ${ROLLOUT}% |"
         } >> "$GITHUB_STEP_SUMMARY"
