@@ -14,10 +14,11 @@ inputs:
   hardware-revision-min: {description: 'Lowest compatible hardware revision.', required: false, default: ''}
   hardware-revision-max: {description: 'Highest compatible hardware revision.', required: false, default: ''}
   release-notes:  {description: 'Release notes stored with the artifact.', required: false, default: ''}
-  signing-key:    {description: 'Ed25519 private key PEM. Pass from secrets.', required: false, default: ''}
+  signing-key:    {description: 'Ed25519 private key PEM. Pass from secrets. A signed build is also made strict-ready.', required: false, default: ''}
   key-id:         {description: 'Signing key id as registered on the project.', required: false, default: ''}
   security-mode:  {description: 'auto, basic, token or signed.', required: false, default: 'auto'}
   base-url:       {description: 'SimpleOTA base URL.', required: false, default: 'https://simpleota.com'}
+  cli-version:    {description: 'SimpleOTA CLI release that makes a signed build strict-ready. Empty means the release this action pins, with pinned checksums. Ignored when simpleota is already on PATH.', required: false, default: ''}
 
 outputs:
   build-number:
@@ -87,24 +88,26 @@ runs:
         PROJECT_ID: ${{ inputs.project-id }}
         BINARY: ${{ inputs.binary }}
         BASE_URL: ${{ inputs.base-url }}
+        SIGNING_KEY: ${{ inputs.signing-key }}
+        CLI_VERSION: ${{ inputs.cli-version }}
       run: |
         set -euo pipefail
-        [ -f "$BINARY" ] || { echo "::error::binary not found: $BINARY"; exit 1; }
-        MANIFEST="$("${{ github.action_path }}/../scripts/manifest.sh")"
+        SCRIPTS="${{ github.action_path }}/../scripts"
 
-        RESP="$("${{ github.action_path }}/../scripts/api.sh" \
-          "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/artifacts/" \
-          -X POST \
-          -H "Authorization: Bearer ${API_TOKEN}" \
-          -F "manifest=${MANIFEST}" \
-          -F "binary=@${BINARY}")"
-
+        RESP="$("$SCRIPTS/upload.sh")"
+        export BUILD
         BUILD="$(jq -r '.build_number' <<<"$RESP")"
         echo "build-number=$BUILD"                        >> "$GITHUB_OUTPUT"
         echo "artifact-id=$(jq -r '.id' <<<"$RESP")"      >> "$GITHUB_OUTPUT"
 
+        SECURITY_TEXT="$SECURITY_MODE"
+        if [ "$SECURITY_MODE" = "signed" ]; then
+          "$SCRIPTS/make-strict.sh"
+          SECURITY_TEXT="signed, strict-ready"
+        fi
+
         {
           echo "### SimpleOTA upload"
           echo ""
-          echo "Build \`$BUILD\` (\`${VERSION_LABEL}\`, ${SECURITY_MODE}) uploaded. No deployment started."
+          echo "Build \`$BUILD\` (\`${VERSION_LABEL}\`, ${SECURITY_TEXT}) uploaded. No deployment started."
         } >> "$GITHUB_STEP_SUMMARY"

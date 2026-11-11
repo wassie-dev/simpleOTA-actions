@@ -30,6 +30,31 @@ Four actions live here. Most pipelines only need the first.
 
 Omit `signing-key` and `key-id` and the build uploads unsigned.
 
+## Strict mode
+
+A signed build is also made strict-ready, with nothing to add to your
+workflow: after the upload, the action signs the build number SimpleOTA
+assigned, together with the project, the key and the image's SHA-256, and
+attaches that strict signature before anything is deployed. Devices in
+[strict mode](https://wiki.simpleota.com/concepts/security-modes/#strict-mode)
+take only such builds, and devices in `signed` mode take them as before.
+
+The [SimpleOTA CLI](https://github.com/wassie-dev/simpleOTA-cli) makes the
+strict signature. Each version of this action pins one CLI release and the
+SHA-256 of its archives (`scripts/cli-pin.txt`), downloads it for that step
+and refuses it if the checksum differs, so pinning the action pins the code
+that handles your key. The download runs without your token or key in its
+environment. A `simpleota` already on the runner's PATH is used instead, and
+`cli-version` names another release, which is then checked only against that
+release's own checksums.
+
+If that step fails, the job fails with the build uploaded and not deployed,
+and the error names the commands that finish it by hand:
+`simpleota build make-strict <build> <bin>`, then
+`simpleota deployment create` for a release. Only strict mode stops a
+replayed build: see the wiki's
+[strict mode](https://wiki.simpleota.com/concepts/security-modes/#strict-mode).
+
 Note that `api-token` and `signing-key` come from **Secrets**, while
 `project-id` comes from **Variables**. GitHub keeps those in two separate
 stores, and referencing one as the other yields an empty string with no useful
@@ -128,12 +153,14 @@ shipping firmware.
 
 **The signing key never touches disk outside the runner.** It is written to
 `RUNNER_TEMP` with `umask 077`, used, and removed by an EXIT trap so a failure
-part-way through does not leave it behind.
+part-way through does not leave it behind. The CLI reads it from the
+environment. Only signatures are sent to SimpleOTA.
 
 ## Requirements
 
 `bash`, `curl`, `jq` and OpenSSL 3.x, all present on GitHub-hosted Ubuntu
-runners. Nothing is installed at runtime.
+runners. Signed builds also use the SimpleOTA CLI, which the action downloads
+into `RUNNER_TEMP` for the job; unsigned builds install nothing.
 
 ## Related
 
