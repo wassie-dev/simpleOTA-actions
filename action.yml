@@ -70,7 +70,7 @@ inputs:
     required: false
     default: 'https://simpleota.com'
   cli-version:
-    description: 'SimpleOTA CLI release that makes a signed build strict-ready, e.g. 0.2.0. Empty means the latest. Ignored when simpleota is already on PATH.'
+    description: 'SimpleOTA CLI release that makes a signed build strict-ready. Empty means the release this action pins, with pinned checksums. Ignored when simpleota is already on PATH.'
     required: false
     default: ''
 
@@ -156,7 +156,7 @@ runs:
         case "${ROLLOUT:-}" in
           ''|*[!0-9]*) echo "::error::rollout-percentage must be a whole number 0-100 (got '${ROLLOUT:-}')"; exit 1 ;;
         esac
-        [ "$ROLLOUT" -le 100 ] || { echo "::error::rollout-percentage must be 0-100 (got '$ROLLOUT')"; exit 1; }
+        [ "$((10#$ROLLOUT))" -le 100 ] || { echo "::error::rollout-percentage must be 0-100 (got '$ROLLOUT')"; exit 1; }
         [ -f "$BINARY" ] || { echo "::error::binary not found: $BINARY"; exit 1; }
 
         if [ "$SECURITY_MODE" = "signed" ]; then
@@ -169,7 +169,8 @@ runs:
           export BUILD ARTIFACT_ID
           BUILD="$(jq -r '.build_number' <<<"$RESP")"
           ARTIFACT_ID="$(jq -r '.id' <<<"$RESP")"
-          "$SCRIPTS/make-strict.sh"
+          DEPLOY_HINT="simpleota deployment create --build ${BUILD} --channel ${CHANNEL} --percent $((10#$ROLLOUT))" \
+            "$SCRIPTS/make-strict.sh"
           DEPLOYMENT_ID="$("$SCRIPTS/start-deployment.sh" | jq -r '.id')"
           SECURITY_TEXT="signed, strict-ready"
         else

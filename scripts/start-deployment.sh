@@ -11,7 +11,7 @@ base="${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/deployments/"
 body="$(jq -nc \
   --arg artifact_id "$ARTIFACT_ID" \
   --arg channel_id "$CHANNEL_ID" \
-  --argjson pct "$ROLLOUT" \
+  --argjson pct "$((10#$ROLLOUT))" \
   '{artifact_id: $artifact_id, rollout_strategy: "immediate", rollout_percentage: $pct,
     target_channel_ids: [$channel_id], target_group_ids: [],
     notes: "Created by the SimpleOTA release action."}')"

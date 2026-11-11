@@ -125,10 +125,49 @@ jobs:
           if OUT="$(FAIL=1 ./scripts/make-strict.sh 2>&1)"; then
             echo "a failed strict signature was reported as success"; exit 1
           fi
-          grep -q "simpleota build make-strict 42" <<<"$OUT"
+          grep -q "Finish with: simpleota build make-strict 42 <bin>$" <<<"$OUT"
+
+          # a release that stops here was not deployed, and is told how to deploy
+          OUT="$(FAIL=1 DEPLOY_HINT='simpleota deployment create --build 42 --channel stable --percent 10' \
+                 ./scripts/make-strict.sh 2>&1 || true)"
+          grep -q "so it was not deployed" <<<"$OUT"
+          grep -q "then: simpleota deployment create --build 42 --channel stable --percent 10" <<<"$OUT"
 
           ls -d "$RUNNER_TEMP"/simpleota-cli.* 2>/dev/null && { echo "work directory left behind"; exit 1; } || true
           echo "strict signing ok"
+
+      - name: The pinned CLI installs, and a wrong checksum is refused
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          CLI="$(./scripts/install-cli.sh "$RUNNER_TEMP/cli")"
+          PINNED="$(awk '$1 == "version" { print $2 }' scripts/cli-pin.txt)"
+          "$CLI" --version | grep -qF "$PINNED"
+
+          # the same archive against a pin that names another checksum
+          cp -r scripts "$RUNNER_TEMP/scripts"
+          sed -i -E 's/^[0-9a-f]{64}  /0000000000000000000000000000000000000000000000000000000000000000  /' \
+            "$RUNNER_TEMP/scripts/cli-pin.txt"
+          if OUT="$("$RUNNER_TEMP/scripts/install-cli.sh" "$RUNNER_TEMP/cli-bad" 2>&1)"; then
+            echo "an archive that does not match the pin was installed"; exit 1
+          fi
+          grep -q "checksum mismatch" <<<"$OUT"
+          [ ! -e "$RUNNER_TEMP/cli-bad/simpleota" ]
+
+          # the installer is run without the token or the key
+          mkdir -p "$RUNNER_TEMP/spy"
+          printf '#!/usr/bin/env bash\nenv > "$SPY_LOG"\nexit 1\n' > "$RUNNER_TEMP/spy/install-cli.sh"
+          cp scripts/make-strict.sh "$RUNNER_TEMP/spy/"
+          chmod +x "$RUNNER_TEMP/spy/install-cli.sh"
+          SPY_LOG="$RUNNER_TEMP/spy.log" API_TOKEN=tok-secret PROJECT_ID=p BASE_URL=https://example.test \
+            SIGNING_KEY=key-secret BUILD=1 BINARY=fw.bin PATH="/usr/bin:/bin" \
+            "$RUNNER_TEMP/spy/make-strict.sh" >/dev/null 2>&1 || true
+          test -s "$RUNNER_TEMP/spy.log"
+          if grep -q "secret" "$RUNNER_TEMP/spy.log"; then
+            echo "the installer was given a secret"; exit 1
+          fi
+          echo "cli install ok"
 
   # Real upload against a live project. Only runs where the secrets exist, so
   # forks and contributors are not blocked by it.

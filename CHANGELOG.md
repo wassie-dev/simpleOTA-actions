@@ -15,8 +15,10 @@ for a fixed version.
   After a signed upload, the release and upload actions attach a strict
   signature over the project, the key, the build number and the image's
   SHA-256, made by the [SimpleOTA CLI](https://github.com/wassie-dev/simpleOTA-cli).
-  The CLI is downloaded for the job unless `simpleota` is already on PATH;
-  the new `cli-version` input pins a release. No workflow change is needed.
+  Each version of the actions pins one CLI release and its archive
+  checksums, and downloads it for the job unless `simpleota` is already on
+  PATH; the new `cli-version` input names another release. No workflow
+  change is needed.
 
 ### Changed
 

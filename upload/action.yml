@@ -18,7 +18,7 @@ inputs:
   key-id:         {description: 'Signing key id as registered on the project.', required: false, default: ''}
   security-mode:  {description: 'auto, basic, token or signed.', required: false, default: 'auto'}
   base-url:       {description: 'SimpleOTA base URL.', required: false, default: 'https://simpleota.com'}
-  cli-version:    {description: 'SimpleOTA CLI release that makes a signed build strict-ready. Empty means the latest. Ignored when simpleota is already on PATH.', required: false, default: ''}
+  cli-version:    {description: 'SimpleOTA CLI release that makes a signed build strict-ready. Empty means the release this action pins, with pinned checksums. Ignored when simpleota is already on PATH.', required: false, default: ''}
 
 outputs:
   build-number:

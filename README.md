@@ -40,13 +40,20 @@ attaches that strict signature before anything is deployed. Devices in
 take only such builds, and devices in `signed` mode take them as before.
 
 The [SimpleOTA CLI](https://github.com/wassie-dev/simpleOTA-cli) makes the
-strict signature. The action downloads the latest release for that step, or
-the one named by `cli-version`, and checks it against the release's
-checksums. A `simpleota` already on the runner's PATH is used instead.
+strict signature. Each version of this action pins one CLI release and the
+SHA-256 of its archives (`scripts/cli-pin.txt`), downloads it for that step
+and refuses it if the checksum differs, so pinning the action pins the code
+that handles your key. The download runs without your token or key in its
+environment. A `simpleota` already on the runner's PATH is used instead, and
+`cli-version` names another release, which is then checked only against that
+release's own checksums.
 
-If that step fails, the job fails with the build uploaded and not deployed.
-Run the job again, or finish with
-`simpleota build make-strict <build> <bin>`.
+If that step fails, the job fails with the build uploaded and not deployed,
+and the error names the commands that finish it by hand:
+`simpleota build make-strict <build> <bin>`, then
+`simpleota deployment create` for a release. Only strict mode stops a
+replayed build: see the wiki's
+[strict mode](https://wiki.simpleota.com/concepts/security-modes/#strict-mode).
 
 Note that `api-token` and `signing-key` come from **Secrets**, while
 `project-id` comes from **Variables**. GitHub keeps those in two separate
