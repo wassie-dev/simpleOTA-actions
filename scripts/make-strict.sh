@@ -32,8 +32,10 @@ trap 'rm -rf "$WORK"' EXIT
 
 CLI="$(command -v simpleota || true)"
 if [ -z "$CLI" ]; then
-  # The installer needs no secrets, so it gets none.
-  CLI="$(env -u SIGNING_KEY -u API_TOKEN "$here/install-cli.sh" "$WORK/bin")" ||
+  # The installer needs no secrets, so it gets none. Quiet, because its
+  # ::error:: would mark a job red that this step leaves green.
+  CLI="$(env -u SIGNING_KEY -u API_TOKEN CLI_INSTALL_QUIET=1 \
+    "$here/install-cli.sh" "$WORK/bin")" ||
     give_up "Could not install the SimpleOTA CLI."
 fi
 
@@ -42,6 +44,11 @@ fi
 if ! "$CLI" build --help 2>/dev/null | grep -q 'make-strict'; then
   give_up "This SimpleOTA CLI ($("$CLI" --version 2>/dev/null || echo unknown version)) has no 'build make-strict'; use a newer cli-version or update the simpleota on PATH."
 fi
+
+# A stalled server must not hold the job until its timeout, which would turn
+# it red after the release went out. macOS runners have no timeout(1).
+limit=()
+if command -v timeout >/dev/null 2>&1; then limit=(timeout 120); fi
 
 # The CLI reads everything from the environment, so neither the token nor the
 # key is placed in argv. Its config directory is a throwaway: nothing is
@@ -52,5 +59,5 @@ SIMPLEOTA_API_URL="${BASE_URL%/}" \
 SIMPLEOTA_SIGNING_KEY="$SIGNING_KEY" \
 SIMPLEOTA_CONFIG_DIR="$WORK/config" \
 SIMPLEOTA_NO_KEYRING=1 \
-  "$CLI" build make-strict "$BUILD" "$BINARY" >&2 ||
+  ${limit[@]+"${limit[@]}"} "$CLI" build make-strict "$BUILD" "$BINARY" >&2 ||
   give_up "The strict signature was not attached."

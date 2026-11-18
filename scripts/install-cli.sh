@@ -10,7 +10,10 @@
 #
 # Run this without secrets in the environment. It needs none.
 #
-# Env: CLI_VERSION (optional)
+# Failures are ::error:: annotations, or plain text with CLI_INSTALL_QUIET=1
+# for a caller that reports them itself and must not mark the job as failed.
+#
+# Env: CLI_VERSION (optional), CLI_INSTALL_QUIET (optional)
 set -euo pipefail
 
 dest="${1:?usage: install-cli.sh <directory>}"
@@ -18,8 +21,15 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 pin="$here/cli-pin.txt"
 releases="https://github.com/wassie-dev/simpleOTA-cli/releases/download"
 
-fail() { echo "::error::$*" >&2; exit 1; }
-fetch() { curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$2" "$1"; }
+fail() {
+  if [ -n "${CLI_INSTALL_QUIET:-}" ]; then echo "install-cli: $*" >&2
+  else echo "::error::$*" >&2; fi
+  exit 1
+}
+fetch() {
+  curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --connect-timeout 10 --max-time 120 \
+    -o "$2" "$1"
+}
 sha256_of() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
   else shasum -a 256 "$1" | cut -d' ' -f1; fi
