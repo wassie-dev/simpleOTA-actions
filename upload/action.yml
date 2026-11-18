@@ -14,7 +14,7 @@ inputs:
   hardware-revision-min: {description: 'Lowest compatible hardware revision.', required: false, default: ''}
   hardware-revision-max: {description: 'Highest compatible hardware revision.', required: false, default: ''}
   release-notes:  {description: 'Release notes stored with the artifact.', required: false, default: ''}
-  signing-key:    {description: 'Ed25519 private key PEM. Pass from secrets. A signed build is also made strict-ready.', required: false, default: ''}
+  signing-key:    {description: 'Ed25519 private key PEM. Pass from secrets. A signed build is also made strict-ready on a best-effort basis; a failure there only warns.', required: false, default: ''}
   key-id:         {description: 'Signing key id as registered on the project.', required: false, default: ''}
   security-mode:  {description: 'auto, basic, token or signed.', required: false, default: 'auto'}
   base-url:       {description: 'SimpleOTA base URL.', required: false, default: 'https://simpleota.com'}

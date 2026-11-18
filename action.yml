@@ -46,7 +46,7 @@ inputs:
     required: false
     default: ''
   signing-key:
-    description: 'Ed25519 private key PEM. Pass from secrets. When set, the build is signed, uploaded as security_mode=signed and made strict-ready, so devices in strict mode take it too.'
+    description: 'Ed25519 private key PEM. Pass from secrets. When set, the build is signed and uploaded as security_mode=signed. It is then made strict-ready on a best-effort basis, for clients with strict mode (API 1.2, not yet released); a failure there only warns.'
     required: false
     default: ''
   key-id:
