@@ -156,7 +156,7 @@ runs:
         case "${ROLLOUT:-}" in
           ''|*[!0-9]*) echo "::error::rollout-percentage must be a whole number 0-100 (got '${ROLLOUT:-}')"; exit 1 ;;
         esac
-        [ "$((10#$ROLLOUT))" -le 100 ] || { echo "::error::rollout-percentage must be 0-100 (got '$ROLLOUT')"; exit 1; }
+        [ "$ROLLOUT" -le 100 ] || { echo "::error::rollout-percentage must be 0-100 (got '$ROLLOUT')"; exit 1; }
         [ -f "$BINARY" ] || { echo "::error::binary not found: $BINARY"; exit 1; }
         MANIFEST="$("$SCRIPTS/manifest.sh")"
 
