@@ -152,6 +152,9 @@ runs:
       run: |
         set -euo pipefail
         SCRIPTS="${{ github.action_path }}/scripts"
+        # Only make-strict.sh needs the key; nothing else this step runs gets it.
+        STRICT_KEY="${SIGNING_KEY:-}"
+        unset SIGNING_KEY
 
         case "${ROLLOUT:-}" in
           ''|*[!0-9]*) echo "::error::rollout-percentage must be a whole number 0-100 (got '${ROLLOUT:-}')"; exit 1 ;;
@@ -182,7 +185,7 @@ runs:
           # Best effort: the build is already released either way, and the
           # server does not offer a build that is not strict-ready to devices
           # in strict mode. make-strict.sh warns with how to finish it.
-          if "$SCRIPTS/make-strict.sh"; then
+          if SIGNING_KEY="$STRICT_KEY" "$SCRIPTS/make-strict.sh"; then
             SECURITY_TEXT="$SECURITY_TEXT, strict-ready"
           else
             SECURITY_TEXT="$SECURITY_TEXT, not strict-ready"
