@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Shell syntax
-        run: for s in scripts/*.sh; do bash -n "$s"; done
+        run: for s in scripts/*.sh tests/*.sh; do bash -n "$s"; done
 
       - name: Every action.yml is a valid composite action
         run: |
@@ -162,6 +162,9 @@ jobs:
             echo "the installer was given a secret"; exit 1
           fi
           echo "cli install ok"
+
+      - name: The release step makes one release call, and strict-ready is best effort
+        run: tests/release-step.sh
 
   # Real upload against a live project. Only runs where the secrets exist, so
   # forks and contributors are not blocked by it.
