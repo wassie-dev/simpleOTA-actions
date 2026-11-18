@@ -163,7 +163,7 @@ jobs:
           fi
           echo "cli install ok"
 
-      - name: The release step makes one release call, and strict-ready is best effort
+      - name: The release and upload steps make one request each, and strict-ready is best effort
         run: tests/release-step.sh
 
   # Real upload against a live project. Only runs where the secrets exist, so
