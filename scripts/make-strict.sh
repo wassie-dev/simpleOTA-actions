@@ -8,29 +8,27 @@
 # already on PATH is used as it is; otherwise install-cli.sh installs the
 # pinned release into RUNNER_TEMP for this step.
 #
+# This step is best effort. On any failure it prints a ::warning:: that names
+# the build and the command that finishes the job, and exits non-zero; the
+# caller carries on. A build that is not strict-ready is still offered to
+# devices in signed mode, and the server keeps it from devices in strict mode.
+#
 # Env: API_TOKEN, PROJECT_ID, BASE_URL, SIGNING_KEY (PEM), BUILD, BINARY,
-#      CLI_VERSION (optional), DEPLOY_HINT (optional: the command that
-#      deploys the build, when the caller would have deployed it next)
+#      CLI_VERSION (optional)
 set -euo pipefail
 
 : "${SIGNING_KEY:?signing-key is empty}"
 : "${BUILD:?build number is empty}"
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK="$(mktemp -d "${RUNNER_TEMP:-/tmp}/simpleota-cli.XXXXXX")"
-trap 'rm -rf "$WORK"' EXIT
-
-# What is left to do by hand when this step fails.
-finish="simpleota build make-strict ${BUILD} <bin>"
-state="was uploaded but is not strict-ready"
-if [ -n "${DEPLOY_HINT:-}" ]; then
-  finish="$finish, then: ${DEPLOY_HINT}"
-  state="$state, so it was not deployed"
-fi
 give_up() {
-  echo "::error::$1 Build ${BUILD} ${state}. Finish with: ${finish}" >&2
+  echo "::warning::$1 Build ${BUILD} was uploaded but is not strict-ready. Finish with: simpleota build make-strict ${BUILD} <bin>" >&2
   exit 1
 }
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORK="$(mktemp -d "${RUNNER_TEMP:-/tmp}/simpleota-cli.XXXXXX")" ||
+  give_up "Could not create a work directory."
+trap 'rm -rf "$WORK"' EXIT
 
 CLI="$(command -v simpleota || true)"
 if [ -z "$CLI" ]; then

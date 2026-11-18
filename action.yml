@@ -158,42 +158,36 @@ runs:
         esac
         [ "$((10#$ROLLOUT))" -le 100 ] || { echo "::error::rollout-percentage must be 0-100 (got '$ROLLOUT')"; exit 1; }
         [ -f "$BINARY" ] || { echo "::error::binary not found: $BINARY"; exit 1; }
+        MANIFEST="$("$SCRIPTS/manifest.sh")"
 
+        # api.sh fails the step on any HTTP error and reports the server's
+        # `detail` message, which plain curl would discard.
+        RESP="$("$SCRIPTS/api.sh" \
+          "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/release/" \
+          -X POST \
+          -H "Authorization: Bearer ${API_TOKEN}" \
+          -F "manifest=${MANIFEST}" \
+          -F "binary=@${BINARY}" \
+          -F "rollout_percentage=${ROLLOUT}" \
+          -F "channel_name=${CHANNEL}")"
+
+        export BUILD
+        BUILD="$(jq -r '.build_number' <<<"$RESP")"
+        echo "build-number=$BUILD"                              >> "$GITHUB_OUTPUT"
+        echo "artifact-id=$(jq -r '.artifact_id' <<<"$RESP")"   >> "$GITHUB_OUTPUT"
+        echo "deployment-id=$(jq -r '.deployment_id' <<<"$RESP")" >> "$GITHUB_OUTPUT"
+
+        SECURITY_TEXT="\`${SECURITY_MODE}\`"
         if [ "$SECURITY_MODE" = "signed" ]; then
-          # A signed build is made strict-ready before it is deployed, so a
-          # deployment never offers it without its strict signature. The
-          # one-call release below deploys at once, so it cannot do that.
-          export CHANNEL_ID
-          CHANNEL_ID="$("$SCRIPTS/channel-id.sh")"
-          RESP="$("$SCRIPTS/upload.sh")"
-          export BUILD ARTIFACT_ID
-          BUILD="$(jq -r '.build_number' <<<"$RESP")"
-          ARTIFACT_ID="$(jq -r '.id' <<<"$RESP")"
-          DEPLOY_HINT="simpleota deployment create --build ${BUILD} --channel ${CHANNEL} --percent $((10#$ROLLOUT))" \
-            "$SCRIPTS/make-strict.sh"
-          DEPLOYMENT_ID="$("$SCRIPTS/start-deployment.sh" | jq -r '.id')"
-          SECURITY_TEXT="signed, strict-ready"
-        else
-          MANIFEST="$("$SCRIPTS/manifest.sh")"
-          # api.sh fails the step on any HTTP error and reports the server's
-          # `detail` message, which plain curl would discard.
-          RESP="$("$SCRIPTS/api.sh" \
-            "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/release/" \
-            -X POST \
-            -H "Authorization: Bearer ${API_TOKEN}" \
-            -F "manifest=${MANIFEST}" \
-            -F "binary=@${BINARY}" \
-            -F "rollout_percentage=${ROLLOUT}" \
-            -F "channel_name=${CHANNEL}")"
-          BUILD="$(jq -r '.build_number' <<<"$RESP")"
-          ARTIFACT_ID="$(jq -r '.artifact_id' <<<"$RESP")"
-          DEPLOYMENT_ID="$(jq -r '.deployment_id' <<<"$RESP")"
-          SECURITY_TEXT="$SECURITY_MODE"
+          # Best effort: the build is already released either way, and the
+          # server does not offer a build that is not strict-ready to devices
+          # in strict mode. make-strict.sh warns with how to finish it.
+          if "$SCRIPTS/make-strict.sh"; then
+            SECURITY_TEXT="$SECURITY_TEXT, strict-ready"
+          else
+            SECURITY_TEXT="$SECURITY_TEXT, not strict-ready"
+          fi
         fi
-
-        echo "build-number=$BUILD"          >> "$GITHUB_OUTPUT"
-        echo "artifact-id=$ARTIFACT_ID"     >> "$GITHUB_OUTPUT"
-        echo "deployment-id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
 
         {
           echo "### SimpleOTA release"
@@ -203,5 +197,5 @@ runs:
           echo "| Build | \`$BUILD\` |"
           echo "| Version | \`${VERSION_LABEL}\` |"
           echo "| Security | ${SECURITY_TEXT} |"
-          echo "| Channel | \`${CHANNEL}\` at ${ROLLOUT}% |"
+          echo "| Channel | \`${CHANNEL}\` at $((10#$ROLLOUT))% |"
         } >> "$GITHUB_STEP_SUMMARY"

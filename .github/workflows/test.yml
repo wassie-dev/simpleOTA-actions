@@ -121,17 +121,11 @@ jobs:
           ./scripts/make-strict.sh
           [ "$(cat "$CALL_LOG")" = "build make-strict 42 fw.bin|tok|proj|https://example.test|pem" ]
 
-          # a failure names the build and the command that finishes the job
+          # a failure exits non-zero for the caller and warns, naming the build
           if OUT="$(FAIL=1 ./scripts/make-strict.sh 2>&1)"; then
             echo "a failed strict signature was reported as success"; exit 1
           fi
-          grep -q "Finish with: simpleota build make-strict 42 <bin>$" <<<"$OUT"
-
-          # a release that stops here was not deployed, and is told how to deploy
-          OUT="$(FAIL=1 DEPLOY_HINT='simpleota deployment create --build 42 --channel stable --percent 10' \
-                 ./scripts/make-strict.sh 2>&1 || true)"
-          grep -q "so it was not deployed" <<<"$OUT"
-          grep -q "then: simpleota deployment create --build 42 --channel stable --percent 10" <<<"$OUT"
+          grep -q "^::warning::.*make-strict 42 " <<<"$OUT"
 
           ls -d "$RUNNER_TEMP"/simpleota-cli.* 2>/dev/null && { echo "work directory left behind"; exit 1; } || true
           echo "strict signing ok"

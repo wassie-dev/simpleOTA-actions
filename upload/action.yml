@@ -102,8 +102,13 @@ runs:
 
         SECURITY_TEXT="$SECURITY_MODE"
         if [ "$SECURITY_MODE" = "signed" ]; then
-          "$SCRIPTS/make-strict.sh"
-          SECURITY_TEXT="signed, strict-ready"
+          # Best effort, as in the release action: make-strict.sh warns with
+          # how to finish it, and the upload still succeeds.
+          if "$SCRIPTS/make-strict.sh"; then
+            SECURITY_TEXT="$SECURITY_TEXT, strict-ready"
+          else
+            SECURITY_TEXT="$SECURITY_TEXT, not strict-ready"
+          fi
         fi
 
         {
