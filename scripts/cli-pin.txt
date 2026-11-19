@@ -1,0 +1,7 @@
+# The SimpleOTA CLI release these actions run, and the SHA-256 of each of
+# its archives. Written by scripts/pin-cli.sh; read by scripts/install-cli.sh.
+version 0.2.0
+d98dcca1255f434a5e59b2428047b4a80d322b3a21da90d8486c3a26c980b620  simpleota_0.2.0_darwin_amd64.tar.gz
+2d9175623004e1b367e266aab782535d004c177f9c4fe9fddaf0a7d0c9235ac6  simpleota_0.2.0_darwin_arm64.tar.gz
+df5108e1244e3c6a12da30c8ed5e8b12a197442f3aaba8c510293242834afa4f  simpleota_0.2.0_linux_amd64.tar.gz
+06d610c7d4dff455768f5a852d63f057808364d7cda216c4573bbb86e8d639c4  simpleota_0.2.0_linux_arm64.tar.gz

@@ -9,6 +9,22 @@ for a fixed version.
 
 ## [Unreleased]
 
+### Added
+
+- Signed builds are made strict-ready, for devices running a client release
+  with strict mode (API 1.2, not yet released). After a signed upload, the
+  release and upload actions attach a strict signature over the project, the
+  key, the build number and the image's SHA-256, made by the
+  [SimpleOTA CLI](https://github.com/wassie-dev/simpleOTA-cli).
+  Each version of the actions pins one CLI release and its archive
+  checksums, and downloads it for the job unless `simpleota` is already on
+  PATH; the new `cli-version` input names another release. No workflow
+  change is needed.
+- Making a build strict-ready is best effort. If it fails, the upload and
+  any deployment go ahead and the job succeeds with a warning that names
+  `simpleota build make-strict <build> <bin>` to finish it later. It needs a
+  SimpleOTA server with the strict-signature endpoint.
+
 ## [1.0.3] - 2026-08-24
 
 ### Fixed
