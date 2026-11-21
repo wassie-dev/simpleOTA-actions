@@ -9,12 +9,17 @@ for a fixed version.
 
 ## [Unreleased]
 
+### Fixed
+
+- Strict mode ships in the Arduino and ESP-IDF clients from 1.2.0. The docs,
+  the `signing-key` input description and the 1.1.0 entry below now say so.
+
 ## [1.1.0] - 2026-11-19
 
 ### Added
 
 - Signed builds are made strict-ready, for devices running a client release
-  with strict mode (API 1.2, not yet released). After a signed upload, the
+  with strict mode (API 1.2). After a signed upload, the
   release and upload actions attach a strict signature over the project, the
   key, the build number and the image's SHA-256, made by the
   [SimpleOTA CLI](https://github.com/wassie-dev/simpleOTA-cli).

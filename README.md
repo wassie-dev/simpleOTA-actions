@@ -38,8 +38,8 @@ assigned, together with the project, the key and the image's SHA-256, and
 attaches that strict signature to the build. Strict-ready builds are for
 devices running a client release with
 [strict mode](https://wiki.simpleota.com/concepts/security-modes/#strict-mode)
-(API 1.2), which is not released yet. Devices in `signed` mode take the
-build as before.
+(API 1.2): SimpleOTAClient for Arduino and the SimpleOTA component for
+ESP-IDF, 1.2.0 and later. Devices in `signed` mode take the build as before.
 
 The [SimpleOTA CLI](https://github.com/wassie-dev/simpleOTA-cli) makes the
 strict signature. Each version of this action pins one CLI release and the
