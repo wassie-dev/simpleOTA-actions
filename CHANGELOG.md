@@ -17,6 +17,10 @@ for a fixed version.
   notes containing `;` were cut short by curl, and the upload failed with
   "manifest must be JSON". The release action's `channel` is sent the same
   way, so a name with `;`, quotes or a leading `@` arrives intact.
+- The release and upload actions send the file the `binary` input names, under
+  its own name, when the path contains `;` or `,`. curl read those as syntax,
+  so `build/fw;1.bin` uploaded `build/fw` if that file existed, and a `,`
+  failed the upload.
 
 ## [1.1.0] - 2026-11-19
 

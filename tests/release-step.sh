@@ -98,7 +98,7 @@ fail() { echo "FAIL: $*"; echo "--- step output"; cat "$t/out"; exit 1; }
 # its environment, and its outputs come from the response.
 check_request() {
   [ "$(wc -l < "$t/api.log")" -eq 1 ] || fail "expected exactly one API request, got: $(cat "$t/api.log")"
-  jq -e --arg bin "binary=@$t/fw.bin" '
+  jq -e --arg bin "binary=@\"$t/fw.bin\"" '
       (.args | any(. == "Authorization: Bearer tok-1"))
       and (.args | any(. == $bin))
       and .key_in_env == false
@@ -178,13 +178,14 @@ done
 # The same steps with the real api.sh and curl, against a server on
 # 127.0.0.1 that saves the bytes of each multipart part it receives. Text
 # that curl's -F would parse (`;`, quotes, a leading @) must reach
-# the server unchanged.
+# the server unchanged, and a binary path with `;` or `,` must send that
+# file under its own name, not a sibling whose name is a prefix of it.
 mkdir -p "$t/real/upload" "$t/received"
 cp -r "$root/scripts" "$t/real/scripts"
 extract_step "$root/action.yml" release "$t/real" > "$t/real-release.sh"
 extract_step "$root/upload/action.yml" upload "$t/real/upload" > "$t/real-upload.sh"
 cat > "$t/server.py" <<'PY'
-import email.parser, email.policy, http.server, os, sys
+import email.parser, email.policy, http.server, os, re, sys
 out, port_fifo = sys.argv[1:]
 count = 0
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -200,6 +201,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             name = part.get_param("name", header="content-disposition")
             with open(os.path.join(d, name), "wb") as f:
                 f.write(part.get_payload(decode=True))
+            # The raw header value: form-data does not backslash-escape the
+            # filename, and the email parser would unescape it.
+            disposition = dict(part.raw_items())["Content-Disposition"]
+            filename = re.search(r'filename="([^"]*)"', disposition)
+            if filename:
+                with open(os.path.join(d, name + ".filename"), "w") as f:
+                    f.write(filename.group(1))
         resp = b'{"build_number": 57, "artifact_id": "art-1", "deployment_id": "dep-1", "id": "art-2"}'
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -223,6 +231,12 @@ exec 3<&-
 notes='Fix A; add B, "quoted" \ backslash, type=text/plain
 second line; filename=x'
 channel='@beta; "eu", west'
+mkdir "$t/paths"
+printf 'sibling' > "$t/paths/fw"
+binaries=('fw;1.bin' 'fw,1.bin' 'fw\1;2.bin' 'q"x\y.bin')
+for file in "${binaries[@]}"; do
+  printf 'firmware at %s' "$file" > "$t/paths/$file"
+done
 expected="$(FRAMEWORK=arduino VERSION_LABEL=1.2.3 CHIP_FAMILY=esp32 SECURITY_MODE=basic \
   RELEASE_NOTES="$notes" "$root/scripts/manifest.sh")"
 
@@ -242,6 +256,21 @@ for name in release upload; do
     printf '050' | cmp -s - "$got/rollout_percentage" ||
       fail "$name: rollout_percentage changed in transit"
   fi
+
+  for file in "${binaries[@]}"; do
+    n=$((n + 1))
+    run_step basic BASE_URL="http://127.0.0.1:$port/" BINARY="$t/paths/$file"
+    [ "$status" -eq 0 ] || fail "$name: upload of '$file' failed"
+    got="$t/received/$n"
+    cmp -s "$t/paths/$file" "$got/binary" || fail "$name: '$file' sent other bytes than its own"
+    # curl escapes `"` in the filename header, so a name with one does not
+    # arrive byte for byte.
+    case "$file" in
+      *'"'*) ;;
+      *) printf '%s' "$file" | cmp -s - "$got/binary.filename" ||
+           fail "$name: '$file' sent under another name: $(cat "$got/binary.filename" 2>/dev/null)" ;;
+    esac
+  done
 done
 
 echo "release and upload steps ok"
