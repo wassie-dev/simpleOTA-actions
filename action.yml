@@ -164,15 +164,17 @@ runs:
         MANIFEST="$("$SCRIPTS/manifest.sh")"
 
         # api.sh fails the step on any HTTP error and reports the server's
-        # `detail` message, which plain curl would discard.
+        # `detail` message, which plain curl would discard. Text fields use
+        # --form-string, since -F reads `;`, quotes and a leading @ or < as
+        # syntax.
         RESP="$("$SCRIPTS/api.sh" \
           "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/release/" \
           -X POST \
           -H "Authorization: Bearer ${API_TOKEN}" \
-          -F "manifest=${MANIFEST}" \
+          --form-string "manifest=${MANIFEST}" \
           -F "binary=@${BINARY}" \
           -F "rollout_percentage=${ROLLOUT}" \
-          -F "channel_name=${CHANNEL}")"
+          --form-string "channel_name=${CHANNEL}")"
 
         export BUILD
         BUILD="$(jq -r '.build_number' <<<"$RESP")"

@@ -9,9 +9,11 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -f "$BINARY" ] || { echo "::error::binary not found: $BINARY" >&2; exit 1; }
 manifest="$("$here/manifest.sh")"
 
+# --form-string, since -F would cut the manifest short at a `;` in the
+# release notes.
 "$here/api.sh" \
   "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/artifacts/" \
   -X POST \
   -H "Authorization: Bearer ${API_TOKEN}" \
-  -F "manifest=${manifest}" \
+  --form-string "manifest=${manifest}" \
   -F "binary=@${BINARY}"
