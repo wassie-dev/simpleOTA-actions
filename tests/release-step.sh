@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # Run the root action's "Upload and deploy" step and the upload action's
-# "Upload artifact" step against a stub SimpleOTA API and a stub CLI, and
-# check what they sent and what they reported.
+# "Upload artifact" step against a stub SimpleOTA API and a stub CLI, then
+# with the real api.sh and curl against a local capture server, and check
+# what they sent and what they reported.
 #
-# Guards two things: a signed build still goes out as one request (/release/
-# or /artifacts/), and a failure to make it strict-ready (CLI missing, CLI too
-# old, CLI error) leaves the step green with a warning instead of failing it.
+# Guards three things: a signed build still goes out as one request (/release/
+# or /artifacts/), a failure to make it strict-ready (CLI missing, CLI too
+# old, CLI error) leaves the step green with a warning instead of failing it,
+# and the form fields curl sends arrive exactly as built.
 #
 # Usage: tests/release-step.sh   (from the repository root; needs python3
-# with PyYAML, and jq)
+# with PyYAML, jq and curl)
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 t="$(mktemp -d)"
-trap 'rm -rf "$t"' EXIT
+server_pid=""
+trap '[ -z "$server_pid" ] || kill "$server_pid" 2>/dev/null; rm -rf "$t"' EXIT
 
 # The actions as the runner would see them, with api.sh swapped for a stub.
 mkdir -p "$t/action/upload" "$t/bin" "$t/nocli"
@@ -170,6 +173,75 @@ for name in release upload; do
   run_step signed API_FAIL=1
   [ "$status" -ne 0 ] || fail "$name: a failed request was reported as success"
   [ ! -s "$t/cli.log" ] || fail "$name: CLI ran after a failed request"
+done
+
+# The same steps with the real api.sh and curl, against a server on
+# 127.0.0.1 that saves the bytes of each multipart part it receives. Text
+# that curl's -F would parse (`;`, quotes, a leading @) must reach
+# the server unchanged.
+mkdir -p "$t/real/upload" "$t/received"
+cp -r "$root/scripts" "$t/real/scripts"
+extract_step "$root/action.yml" release "$t/real" > "$t/real-release.sh"
+extract_step "$root/upload/action.yml" upload "$t/real/upload" > "$t/real-upload.sh"
+cat > "$t/server.py" <<'PY'
+import email.parser, email.policy, http.server, os, sys
+out, port_fifo = sys.argv[1:]
+count = 0
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        global count
+        count += 1
+        body = self.rfile.read(int(self.headers["Content-Length"]))
+        head = b"Content-Type: " + self.headers["Content-Type"].encode() + b"\r\n\r\n"
+        msg = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(head + body)
+        d = os.path.join(out, str(count))
+        os.mkdir(d)
+        for part in msg.iter_parts():
+            name = part.get_param("name", header="content-disposition")
+            with open(os.path.join(d, name), "wb") as f:
+                f.write(part.get_payload(decode=True))
+        resp = b'{"build_number": 57, "artifact_id": "art-1", "deployment_id": "dep-1", "id": "art-2"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp)
+    def log_message(self, *args):
+        pass
+server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+with open(port_fifo, "w") as f:
+    f.write(f"{server.server_port}\n")
+server.serve_forever()
+PY
+mkfifo "$t/port"
+exec 3<>"$t/port"
+python3 -I "$t/server.py" "$t/received" "$t/port" &
+server_pid=$!
+read -r -t 10 port <&3 || { echo "FAIL: capture server did not start"; exit 1; }
+exec 3<&-
+
+notes='Fix A; add B, "quoted" \ backslash, type=text/plain
+second line; filename=x'
+channel='@beta; "eu", west'
+expected="$(FRAMEWORK=arduino VERSION_LABEL=1.2.3 CHIP_FAMILY=esp32 SECURITY_MODE=basic \
+  RELEASE_NOTES="$notes" "$root/scripts/manifest.sh")"
+
+n=0
+for name in release upload; do
+  step="$t/real-$name.sh"
+  n=$((n + 1))
+  run_step basic BASE_URL="http://127.0.0.1:$port/" RELEASE_NOTES="$notes" CHANNEL="$channel"
+  [ "$status" -eq 0 ] || fail "$name: request through curl failed"
+  got="$t/received/$n"
+  printf '%s' "$expected" | cmp -s - "$got/manifest" ||
+    fail "$name: manifest changed in transit: $(cat "$got/manifest" 2>/dev/null)"
+  cmp -s "$t/fw.bin" "$got/binary" || fail "$name: binary changed in transit"
+  if [ "$name" = release ]; then
+    printf '%s' "$channel" | cmp -s - "$got/channel_name" ||
+      fail "$name: channel_name changed in transit: $(cat "$got/channel_name" 2>/dev/null)"
+    printf '050' | cmp -s - "$got/rollout_percentage" ||
+      fail "$name: rollout_percentage changed in transit"
+  fi
 done
 
 echo "release and upload steps ok"

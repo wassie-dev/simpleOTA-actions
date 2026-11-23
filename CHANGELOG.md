@@ -13,6 +13,10 @@ for a fixed version.
 
 - Strict mode ships in the Arduino and ESP-IDF clients from 1.2.0. The docs,
   the `signing-key` input description and the 1.1.0 entry below now say so.
+- The release and upload actions send the manifest exactly as built. Release
+  notes containing `;` were cut short by curl, and the upload failed with
+  "manifest must be JSON". The release action's `channel` is sent the same
+  way, so a name with `;`, quotes or a leading `@` arrives intact.
 
 ## [1.1.0] - 2026-11-19
 
