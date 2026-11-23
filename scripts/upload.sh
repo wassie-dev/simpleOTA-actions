@@ -10,10 +10,10 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 manifest="$("$here/manifest.sh")"
 
 # --form-string, since -F would cut the manifest short at a `;` in the
-# release notes.
+# release notes. form-file.sh quotes the binary's path for the same reason.
 "$here/api.sh" \
   "${BASE_URL%/}/api/v1/projects/${PROJECT_ID}/artifacts/" \
   -X POST \
   -H "Authorization: Bearer ${API_TOKEN}" \
   --form-string "manifest=${manifest}" \
-  -F "binary=@${BINARY}"
+  -F "$("$here/form-file.sh" binary "$BINARY")"
