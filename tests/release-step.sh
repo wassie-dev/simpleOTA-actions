@@ -232,8 +232,10 @@ notes='Fix A; add B, "quoted" \ backslash, type=text/plain
 second line; filename=x'
 channel='@beta; "eu", west'
 mkdir "$t/paths"
-printf 'sibling' > "$t/paths/fw"
-binaries=('fw;1.bin' 'fw,1.bin' 'fw\1;2.bin' 'q"x\y.bin')
+for sibling in 'fw' 'fw\' 'fw\1.bin'; do
+  printf 'sibling' > "$t/paths/$sibling"
+done
+binaries=('fw;1.bin' 'fw,1.bin' 'fw\1;2.bin' 'q"x\y.bin' 'fw\";2.bin' 'fw\\1.bin')
 for file in "${binaries[@]}"; do
   printf 'firmware at %s' "$file" > "$t/paths/$file"
 done
@@ -263,8 +265,8 @@ for name in release upload; do
     [ "$status" -eq 0 ] || fail "$name: upload of '$file' failed"
     got="$t/received/$n"
     cmp -s "$t/paths/$file" "$got/binary" || fail "$name: '$file' sent other bytes than its own"
-    # curl escapes `"` in the filename header, so a name with one does not
-    # arrive byte for byte.
+    # curl percent-encodes `"` as %22 in the filename header, so a name with
+    # one does not arrive byte for byte.
     case "$file" in
       *'"'*) ;;
       *) printf '%s' "$file" | cmp -s - "$got/binary.filename" ||
